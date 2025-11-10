@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reactive Chat - WebSocket</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .chat-container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
+            width: 90vw;
+            max-width: 800px;
+            height: 80vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .chat-header {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        
+        .chat-header h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+        
+        .connection-status {
+            margin-top: 5px;
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+        
+        .status-disconnected { color: #ff6b6b; }
+        .status-connecting { color: #feca57; }
+        .status-connected { color: #48ca48; }
+        
+        .messages-container {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            background: #f8f9fa;
+        }
+        
+        .message {
+            margin-bottom: 15px;
+            padding: 10px 15px;
+            border-radius: 15px;
+            max-width: 70%;
+            word-wrap: break-word;
+        }
+        
+        .message-sent {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            margin-left: auto;
+            text-align: right;
+        }
+        
+        .message-received {
+            background: white;
+            color: #333;
+            border: 1px solid #e9ecef;
+        }
+        
+        .message-time {
+            font-size: 0.8rem;
+            opacity: 0.7;
+            margin-top: 5px;
+        }
+        
+        .message-sender {
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+        
+        .chat-input {
+            display: flex;
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #e9ecef;
+        }
+        
+        .input-field {
+            flex: 1;
+            padding: 12px 15px;
+            border: 2px solid #e9ecef;
+            border-radius: 25px;
+            outline: none;
+            font-size: 1rem;
+            transition: border-color 0.3s ease;
+        }
+        
+        .input-field:focus {
+            border-color: #667eea;
+        }
+        
+        .send-button {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            border-radius: 25px;
+            padding: 12px 20px;
+            margin-left: 10px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: transform 0.2s ease;
+        }
+        
+        .send-button:hover {
+            transform: translateY(-2px);
+        }
+        
+        .send-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        @media (max-width: 600px) {
+            .chat-container {
+                width: 95vw;
+                height: 90vh;
+            }
+            
+            .message {
+                max-width: 85%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <h1>🔄 Reactive Chat</h1>
+            <div class="connection-status status-disconnected" id="connectionStatus">
+                ⚪ Disconnected
+            </div>
+        </div>
+        
+        <div class="messages-container" id="messagesContainer">
+            <div class="message message-received">
+                <div class="message-sender">System</div>
+                <div class="message-content">Welcome to the reactive chat! Connect to start messaging.</div>
+                <div class="message-time" id="welcomeTime"></div>
+            </div>
+        </div>
+        
+        <div class="chat-input">
+            <input type="text" class="input-field" id="messageInput" placeholder="Enter your message..." maxlength="500">
+            <button class="send-button" id="sendButton" onclick="sendMessage()" disabled>Send</button>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let isConnected = false;
+        let currentUser = '';
+        
+        // Initialize the chat
+        document.addEventListener('DOMContentLoaded', function() {
+            showWelcomeTime();
+            setTimeout(() => connectWebSocket(), 1000);
+        });
+        
+        function showWelcomeTime() {
+            const now = new Date();
+            const timeString = now.toLocaleTimeString();
+            document.getElementById('welcomeTime').textContent = timeString;
+        }
+        
+        function connectWebSocket() {
+            const statusElement = document.getElementById('connectionStatus');
+            const sendButton = document.getElementById('sendButton');
+            
+            // Update status to connecting
+            statusElement.className = 'connection-status status-connecting';
+            statusElement.textContent = '🟡 Connecting...';
+            
+            try {
+                // Connect to WebSocket endpoint
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${protocol}//${window.location.host}/ws/chat`;
+                
+                ws = new WebSocket(wsUrl);
+                
+                ws.onopen = function(event) {
+                    console.log('WebSocket connection opened');
+                    isConnected = true;
+                    
+                    statusElement.className = 'connection-status status-connected';
+                    statusElement.textContent = '🟢 Connected';
+                    
+                    sendButton.disabled = false;
+                    addMessage('System', 'Connected to chat server!', 'received');
+                };
+                
+                ws.onmessage = function(event) {
+                    console.log('WebSocket message received:', event.data);
+                    
+                    try {
+                        const messageData = JSON.parse(event.data);
+                        
+                        if (messageData.error) {
+                            addMessage('Error', messageData.error, 'received');
+                        } else {
+                            addMessage(messageData.sender || 'Unknown', messageData.content, 'received');
+                        }
+                    } catch (e) {
+                        console.error('Error parsing message:', e);
+                        addMessage('Error', 'Failed to parse message', 'received');
+                    }
+                };
+                
+                ws.onclose = function(event) {
+                    console.log('WebSocket connection closed:', event.code, event.reason);
+                    isConnected = false;
+                    
+                    statusElement.className = 'connection-status status-disconnected';
+                    statusElement.textContent = '🔴 Disconnected';
+                    
+                    sendButton.disabled = true;
+                    addMessage('System', 'Connection closed. Attempting to reconnect...', 'received');
+                    
+                    // Attempt to reconnect after 3 seconds
+                    setTimeout(() => {
+                        if (!isConnected) {
+                            connectWebSocket();
+                        }
+                    }, 3000);
+                };
+                
+                ws.onerror = function(event) {
+                    console.error('WebSocket error:', event);
+                    isConnected = false;
+                    
+                    statusElement.className = 'connection-status status-disconnected';
+                    statusElement.textContent = '🔴 Connection Error';
+                    sendButton.disabled = true;
+                };
+                
+            } catch (error) {
+                console.error('Failed to create WebSocket connection:', error);
+                statusElement.className = 'connection-status status-disconnected';
+                statusElement.textContent = '🔴 Failed to Connect';
+                sendButton.disabled = true;
+            }
+        }
+        
+        function sendMessage() {
+            const messageInput = document.getElementById('messageInput');
+            const sendButton = document.getElementById('sendButton');
+            
+            const message = messageInput.value.trim();
+            if (!message) return;
+            
+            // Prompt for username if not set
+            if (!currentUser) {
+                currentUser = prompt('Enter your username:');
+                if (!currentUser || currentUser.trim() === '') {
+                    currentUser = 'Anonymous';
+                }
+            }
+            
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                // Create message object
+                const messageData = {
+                    sender: currentUser,
+                    content: message
+                };
+                
+                try {
+                    // Send the message
+                    ws.send(JSON.stringify(messageData));
+                    
+                    // Add to local display
+                    addMessage('You', message, 'sent');
+                    
+                    // Clear input
+                    messageInput.value = '';
+                    
+                } catch (error) {
+                    console.error('Error sending message:', error);
+                    addMessage('Error', 'Failed to send message', 'received');
+                }
+            } else {
+                addMessage('Error', 'Not connected to server', 'received');
+            }
+        }
+        
+        function addMessage(sender, content, type) {
+            const messagesContainer = document.getElementById('messagesContainer');
+            const messageDiv = document.createElement('div');
+            
+            const messageClass = type === 'sent' ? 'message-sent' : 'message-received';
+            const time = new Date().toLocaleTimeString();
+            
+            messageDiv.className = `message ${messageClass}`;
+            messageDiv.innerHTML = `
+                <div class="message-sender">${sender}</div>
+                <div class="message-content">${escapeHtml(content)}</div>
+                <div class="message-time">${time}</div>
+            `;
+            
+            messagesContainer.appendChild(messageDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Handle Enter key in message input
+        document.getElementById('messageInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+        
+        // Auto-focus message input when connected
+        const messageInput = document.getElementById('messageInput');
+        const observer = new MutationObserver(function() {
+            if (!messageInput.disabled) {
+                messageInput.focus();
+            }
+        });
+        
+        observer.observe(messageInput, { attributes: true, attributeFilter: ['disabled'] });
+    </script>
+</body>
+</html>
